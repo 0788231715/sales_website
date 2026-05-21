@@ -40,6 +40,7 @@ ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['*'])
 INSTALLED_APPS = [
     'daphne', # Must be at the top
     'django.contrib.admin',
+    'django.contrib.admindocs',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
