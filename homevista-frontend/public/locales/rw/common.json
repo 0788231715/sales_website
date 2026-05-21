@@ -1,0 +1,38 @@
+{
+  "nav": {
+    "home": "AHABANZA",
+    "properties": "INZU",
+    "services": "SERVISI",
+    "about": "IBYEREKEYE",
+    "contact": "TWANDIKIRE",
+    "account": "KANDA HANO",
+    "dashboard": "IDASHIBODI",
+    "gallery": "AMAFOTO"
+  },
+  "hero": {
+    "title": "Gura Inzu yawe ya",
+    "title_italic": "Minenerwe",
+    "subtitle": "Vumbura inzu z'akataraboneka mu bice byiza cyane mu gihugu.",
+    "search": "SHAKISHA",
+    "placeholder_location": "Shakira hano...",
+    "placeholder_type": "Ubwoko bw'inzu"
+  },
+  "home": {
+    "exclusive": "AKATARABONEKA",
+    "featured_title": "Inzu zatoranyijwe",
+    "view_all": "REBA INZU ZOSE",
+    "cta_title": "Witeguye kubona",
+    "cta_italic": "Ijuru ryawe",
+    "cta_subtitle": "Sanga abantu barenga 10,000 bamaze kubona inzu z'inzozi zabo binyuze kuri HomeVista.",
+    "cta_button": "TANNGIRA NONAHA"
+  },
+  "about": {
+    "story_label": "AMATEKA YACU",
+    "story_title": "Guhindura Isura y'Inzu",
+    "story_italic": "z'Agaciro",
+    "story_p": "Yatangiye mu 2026, HomeVista yabaye inkingi ya mwamba mu bucuruzi bw'inzu z'agaciro. Duza abaguzi bafite amahitamo adasanzwe n'inzu z'akataraboneka zishushanyije mu buryo bugezweho.",
+    "stat_sold": "Inzu zagurishijwe",
+    "stat_volume": "Agaciro k'ubucuruzi",
+    "team_title": "Hura n'Abakozi Bacu b'Intashyikirwa"
+  }
+}
