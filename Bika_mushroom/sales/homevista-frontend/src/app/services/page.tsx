@@ -2,13 +2,13 @@
 
 import React from "react";
 import { motion } from "framer-motion";
-import { FiCalculator, FiCamera, FiCalendar, FiMap, FiCheckCircle } from "react-icons/fi";
+import { FiPercent, FiCamera, FiCalendar, FiMap, FiCheckCircle } from "react-icons/fi";
 
 const services = [
   {
     title: "Mortgage Calculator",
     description: "Plan your finances with our advanced mortgage calculation tool.",
-    icon: <FiCalculator size={32} />,
+    icon: <FiPercent size={32} />,
     color: "bg-blue-500/10 text-blue-500",
   },
   {

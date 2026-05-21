@@ -13,6 +13,7 @@ class IsOwnerOrReadOnly(permissions.BasePermission):
 class PropertyViewSet(viewsets.ModelViewSet):
     queryset = Property.objects.all()
     serializer_class = PropertySerializer
+    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['status', 'bedrooms', 'bathrooms', 'price']
     search_fields = ['title', 'description', 'address']
