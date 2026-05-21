@@ -14,8 +14,8 @@ class PropertyImageInline(admin.TabularInline):
 
 @admin.register(Property)
 class PropertyAdmin(admin.ModelAdmin):
-    list_display = ('title', 'owner_link', 'price_display', 'colored_status', 'is_verified', 'views_count', 'created_at')
-    list_filter = ('status', 'is_verified', 'bedrooms', 'bathrooms')
+    list_display = ('title', 'owner_link', 'price_display', 'currency', 'status', 'is_verified', 'views_count', 'created_at')
+    list_filter = ('status', 'currency', 'is_verified', 'bedrooms', 'bathrooms')
     search_fields = ('title', 'address', 'owner__email')
     inlines = [PropertyImageInline]
     list_editable = ('is_verified', 'status')

@@ -87,7 +87,7 @@ export default function PropertiesPage() {
                     >
                       {property.status}
                     </motion.div>
-                    {property.views > 100 && (
+                    {property.views_count > 100 && (
                       <motion.div 
                         animate={{ scale: [1, 1.1, 1] }}
                         transition={{ repeat: Infinity, duration: 2 }}
@@ -104,7 +104,7 @@ export default function PropertiesPage() {
                     animate={{ y: 0, opacity: 1 }}
                     className="absolute bottom-4 right-4 bg-black/60 backdrop-blur-xl text-white text-sm font-bold px-4 py-2 rounded-2xl border border-white/10"
                   >
-                    ${parseFloat(property.price).toLocaleString()}
+                    {property.currency} {parseFloat(property.price).toLocaleString()}
                   </motion.div>
                 </div>
                 <div className="p-6">

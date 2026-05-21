@@ -10,9 +10,17 @@ class Property(models.Model):
         ('RENTED', 'Rented'),
     )
 
+    CURRENCY_CHOICES = (
+        ('USD', 'US Dollar'),
+        ('RWF', 'Rwandan Franc'),
+        ('EUR', 'Euro'),
+        ('GBP', 'British Pound'),
+    )
+
     title = models.CharField(max_length=255)
     description = models.TextField()
     price = models.DecimalField(max_digits=15, decimal_places=2)
+    currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='USD')
     address = models.CharField(max_length=512)
     latitude = models.FloatField(null=True, blank=True)
     longitude = models.FloatField(null=True, blank=True)

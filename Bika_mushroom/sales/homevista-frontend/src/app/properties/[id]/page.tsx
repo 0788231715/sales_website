@@ -155,7 +155,7 @@ export default function PropertyDetailPage() {
                   animate={{ scale: 1 }}
                   className="text-4xl font-serif text-accent"
                 >
-                  ${parseFloat(property.price).toLocaleString()}
+                  {property.currency} {parseFloat(property.price).toLocaleString()}
                 </motion.span>
              </div>
              

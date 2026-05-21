@@ -23,7 +23,7 @@ class PropertySerializer(serializers.ModelSerializer):
     class Meta:
         model = Property
         fields = '__all__'
-        read_only_fields = ('owner', 'views', 'created_at', 'updated_at')
+        read_only_fields = ('owner', 'views_count', 'created_at', 'updated_at')
 
     def get_average_rating(self, obj):
         reviews = obj.reviews.all()
