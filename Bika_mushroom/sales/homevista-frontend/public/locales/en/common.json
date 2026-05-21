@@ -1,0 +1,36 @@
+{
+  "nav": {
+    "home": "HOME",
+    "properties": "PROPERTIES",
+    "services": "SERVICES",
+    "about": "ABOUT",
+    "contact": "CONTACT",
+    "account": "ACCOUNT"
+  },
+  "hero": {
+    "title": "Find Your Perfect",
+    "title_italic": "Dream Home",
+    "subtitle": "Discover exclusive luxury properties in the most prestigious locations.",
+    "search": "SEARCH",
+    "placeholder_location": "Search by location...",
+    "placeholder_type": "Property Type"
+  },
+  "home": {
+    "exclusive": "EXCLUSIVE",
+    "featured_title": "Featured Properties",
+    "view_all": "VIEW ALL PROPERTIES",
+    "cta_title": "Ready to Find Your",
+    "cta_italic": "Paradise",
+    "cta_subtitle": "Join over 10,000+ happy homeowners who found their dream property with HomeVista.",
+    "cta_button": "GET STARTED NOW"
+  },
+  "about": {
+    "story_label": "OUR STORY",
+    "story_title": "Redefining Luxury",
+    "story_italic": "Real Estate",
+    "story_p": "Founded in 2026, HomeVista has become the gold standard for luxury property marketplaces. We connect the world's most discerning buyers with exceptional residences that define architectural excellence.",
+    "stat_sold": "Properties Sold",
+    "stat_volume": "Transaction Volume",
+    "team_title": "Meet Our Elite Agents"
+  }
+}
