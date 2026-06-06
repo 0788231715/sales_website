@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import axios from "axios";
+import api from "@/utils/api";
 import { useAuth } from "@/context/AuthContext";
 import { FiDollarSign, FiCalendar, FiCheckCircle, FiArrowRight, FiFileText, FiUpload, FiAlertCircle } from "react-icons/fi";
 import Link from "next/link";
@@ -10,16 +10,14 @@ import Link from "next/link";
 export default function TransactionHistoryPage() {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
-  const { token, user } = useAuth();
+  const { user } = useAuth();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadingId, setUploadingId] = useState<number | null>(null);
 
   const fetchBookings = async () => {
     try {
-      const response = await axios.get("http://localhost:8000/api/bookings/", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setBookings(response.data);
+      const response = await api.get("/bookings/");
+      setBookings(response.data.results || response.data);
     } catch (error) {
       console.error("Error fetching bookings", error);
     } finally {
@@ -28,19 +26,16 @@ export default function TransactionHistoryPage() {
   };
 
   useEffect(() => {
-    if (token) fetchBookings();
-  }, [token]);
+    fetchBookings();
+  }, []);
 
   const handleConfirmWithProof = async (bookingId: number) => {
     const formData = new FormData();
     if (selectedFile) formData.append('payment_proof', selectedFile);
 
     try {
-      await axios.post(`http://localhost:8000/api/bookings/${bookingId}/confirm_deal/`, formData, {
-        headers: { 
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data'
-        },
+      await api.post(`/bookings/${bookingId}/confirm_deal/`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
       alert("Deal Confirmed!");
       fetchBookings();
@@ -51,9 +46,7 @@ export default function TransactionHistoryPage() {
 
   const handleRequestReversal = async (bookingId: number) => {
     try {
-      await axios.post(`http://localhost:8000/api/bookings/${bookingId}/request_reversal/`, {}, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      await api.post(`/bookings/${bookingId}/request_reversal/`);
       alert("Reversal Request Sent to Admin");
       fetchBookings();
     } catch (error) {

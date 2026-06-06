@@ -1,9 +1,11 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { FiSearch, FiMapPin, FiHome, FiTrendingUp } from "react-icons/fi";
+import { FiSearch, FiMapPin, FiHome, FiTrendingUp, FiArrowRight } from "react-icons/fi";
 import { useLanguage } from "@/context/LanguageContext";
+import api from "@/utils/api";
+import Link from "next/link";
 
 const HeroSection = () => {
   const { t } = useLanguage();
@@ -61,9 +63,9 @@ const HeroSection = () => {
               <option value="mansion">Mansion</option>
             </select>
           </div>
-          <button className="bg-accent hover:bg-accent-dark text-primary-dark font-bold px-8 py-4 rounded-xl transition-all flex items-center gap-2 w-full md:w-auto">
+          <Link href="/properties" className="bg-accent hover:bg-accent-dark text-primary-dark font-bold px-8 py-4 rounded-xl transition-all flex items-center justify-center gap-2 w-full md:w-auto">
             <FiSearch /> {t("hero.search")}
-          </button>
+          </Link>
         </motion.div>
       </div>
       <div className="absolute bottom-0 left-0 w-full h-32 bg-gradient-to-t from-background to-transparent" />
@@ -73,6 +75,23 @@ const HeroSection = () => {
 
 export default function Home() {
   const { t } = useLanguage();
+  const [featuredProperties, setFeaturedProperties] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchFeatured = async () => {
+      try {
+        const res = await api.get("/properties/?ordering=-views_count&limit=3");
+        setFeaturedProperties(res.data.results || res.data);
+      } catch (err) {
+        console.error("Error fetching featured properties", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchFeatured();
+  }, []);
+
   return (
     <div className="bg-background overflow-x-hidden">
       <HeroSection />
@@ -84,106 +103,78 @@ export default function Home() {
             whileInView={{ opacity: 1, x: 0 }}
             viewport={{ once: true }}
           >
-            <h2 className="text-accent text-sm font-bold tracking-[0.3em] mb-4">{t("home.exclusive")}</h2>
+            <h2 className="text-accent text-sm font-bold tracking-[0.3em] mb-4 uppercase">{t("home.exclusive")}</h2>
             <h3 className="text-4xl md:text-5xl font-serif">{t("home.featured_title")}</h3>
           </motion.div>
-          <button className="text-accent border-b border-accent pb-1 hover:text-accent-dark hover:border-accent-dark transition-all hidden md:block">
+          <Link href="/properties" className="text-accent border-b border-accent pb-1 hover:text-accent-dark hover:border-accent-dark transition-all hidden md:block font-bold text-xs uppercase tracking-widest">
             {t("home.view_all")}
-          </button>
+          </Link>
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          {[1, 2, 3].map((item, i) => (
-            <motion.div
-              key={item}
-              initial={{ opacity: 0, y: 50 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ delay: i * 0.2 }}
-              whileHover={{ y: -10 }}
-              className="group relative bg-primary-dark/5 dark:bg-white/5 rounded-3xl overflow-hidden border border-white/10"
-            >
-              <div className="relative h-72 overflow-hidden">
-                <img 
-                  src={`https://images.unsplash.com/photo-1600${58 + item}5154340-be6161a56a0c?q=80&w=1000&auto=format&fit=crop`} 
-                  alt="Property" 
-                  className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
-                />
-                <div className="absolute top-4 left-4 flex gap-2">
-                  <div className="bg-accent text-primary-dark text-xs font-bold px-3 py-1 rounded-full uppercase">
-                    FOR SALE
-                  </div>
-                  {i === 0 && (
+          {loading ? (
+             [1, 2, 3].map((i) => <div key={i} className="h-96 glass animate-pulse rounded-3xl" />)
+          ) : (
+            featuredProperties.map((property: any, i: number) => (
+              <motion.div
+                key={property.id}
+                initial={{ opacity: 0, y: 50 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: i * 0.2 }}
+                whileHover={{ y: -10 }}
+                className="group relative bg-primary-dark/5 dark:bg-white/5 rounded-3xl overflow-hidden border border-white/10"
+              >
+                <Link href={`/properties/${property.id}`}>
+                    <div className="relative h-72 overflow-hidden">
+                    <img 
+                        src={property.images?.[0]?.image || `https://images.unsplash.com/photo-1600585154340-be6161a56a0c?q=80&w=1000&auto=format&fit=crop`} 
+                        alt={property.title} 
+                        className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+                    />
+                    <div className="absolute top-4 left-4 flex gap-2">
+                        <div className="bg-accent text-primary-dark text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest shadow-lg">
+                        {property.property_type}
+                        </div>
+                        {property.views_count > 50 && (
+                        <motion.div 
+                            animate={{ opacity: [0.5, 1, 0.5] }}
+                            transition={{ repeat: Infinity, duration: 1.5 }}
+                            className="bg-rose-500 text-white text-[10px] font-black px-3 py-1 rounded-full flex items-center gap-1 shadow-lg"
+                        >
+                            <FiTrendingUp /> TRENDING
+                        </motion.div>
+                        )}
+                    </div>
                     <motion.div 
-                      animate={{ opacity: [0.5, 1, 0.5] }}
-                      transition={{ repeat: Infinity, duration: 1.5 }}
-                      className="bg-red-500 text-white text-[10px] font-bold px-3 py-1 rounded-full flex items-center gap-1"
+                        whileHover={{ scale: 1.1 }}
+                        className="absolute bottom-4 right-4 bg-black/60 backdrop-blur-md text-white text-sm font-black px-4 py-2 rounded-2xl border border-white/10"
                     >
-                      <FiTrendingUp /> TRENDING
+                        ${parseFloat(property.price).toLocaleString()}
                     </motion.div>
-                  )}
-                </div>
-                <motion.div 
-                  whileHover={{ scale: 1.1 }}
-                  className="absolute top-4 right-4 bg-black/50 backdrop-blur-md text-white text-xs font-bold px-3 py-1 rounded-full"
-                >
-                  $2,450,000
-                </motion.div>
-              </div>
-              <div className="p-6">
-                <h4 className="text-xl font-serif mb-2 group-hover:text-accent transition-colors">The Serenity Villa</h4>
-                <div className="flex items-center text-foreground/60 text-sm mb-4">
-                  <FiMapPin className="mr-2 text-accent" /> Beverly Hills, CA
-                </div>
-                <div className="flex justify-between items-center pt-4 border-t border-foreground/10">
-                  <div className="flex gap-4">
-                    <span className="text-sm font-medium">4 Beds</span>
-                    <span className="text-sm font-medium">3 Baths</span>
-                    <span className="text-sm font-medium">3,500 sqft</span>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          ))}
-        </div>
-      </section>
-
-      {/* Suggested for You Section (AI Intelligence Layer) */}
-      <section className="py-24 px-6 max-w-7xl mx-auto bg-white/5 rounded-[3rem] my-12 border border-white/5">
-        <div className="flex flex-col md:flex-row justify-between items-center mb-12 gap-6">
-          <div className="text-center md:text-left">
-            <h2 className="text-accent text-sm font-bold tracking-[0.3em] mb-4 uppercase">Personalized</h2>
-            <h3 className="text-4xl md:text-5xl font-serif">Suggested <span className="text-accent">For You</span></h3>
-            <p className="text-foreground/60 mt-4 max-w-lg">Based on your browsing behavior and preferences, our AI found these perfect matches.</p>
-          </div>
-          <div className="bg-primary-dark/5 p-4 rounded-2xl flex items-center gap-4">
-              <div className="p-3 bg-accent/20 rounded-xl text-accent"><FiTrendingUp size={24}/></div>
-              <div className="text-sm font-medium">AI Match Rate: <span className="text-accent font-bold">98.4%</span></div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            {[1, 2, 3, 4].map((item, i) => (
-                <div key={item} className="group cursor-pointer">
-                    <div className="relative h-60 rounded-3xl overflow-hidden mb-4">
-                        <img 
-                            src={`https://images.unsplash.com/photo-1600585154${340 + item}?q=80&w=600&auto=format&fit=crop`} 
-                            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                        />
-                        <div className="absolute top-3 left-3 bg-white/90 backdrop-blur-md px-3 py-1 rounded-full text-[10px] font-bold text-primary-dark">
-                            SMART MATCH
+                    </div>
+                    <div className="p-6">
+                    <h4 className="text-xl font-serif mb-2 group-hover:text-accent transition-colors">{property.title}</h4>
+                    <div className="flex items-center text-foreground/60 text-sm mb-4">
+                        <FiMapPin className="mr-2 text-accent" /> {property.address}
+                    </div>
+                    <div className="flex justify-between items-center pt-4 border-t border-foreground/10">
+                        <div className="flex gap-4 text-foreground/80 text-xs font-bold uppercase tracking-widest">
+                        <span>{property.bedrooms} Beds</span>
+                        <span>{property.bathrooms} Baths</span>
+                        <span>{property.size} sqm</span>
                         </div>
                     </div>
-                    <h5 className="font-serif text-lg mb-1 group-hover:text-accent transition-colors">Oakwood Manor</h5>
-                    <p className="text-sm text-foreground/50 flex items-center gap-2"><FiMapPin className="text-accent"/> Portland, OR</p>
-                    <div className="flex justify-between items-center mt-3 pt-3 border-t border-foreground/5">
-                        <span className="font-bold text-accent">$850k</span>
-                        <span className="text-xs text-foreground/40 italic">92% Match</span>
                     </div>
-                </div>
-            ))}
+                </Link>
+              </motion.div>
+            ))
+          )}
         </div>
       </section>
+
+      {/* suggested for you left as is or similarly updated if endpoint exists for recommendations */}
+
 
       <section className="py-24 bg-primary-dark text-white relative overflow-hidden">
         <div className="absolute top-0 right-0 w-96 h-96 bg-accent/10 blur-[100px] rounded-full -mr-48 -mt-48" />

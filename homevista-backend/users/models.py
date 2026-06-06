@@ -47,6 +47,7 @@ class User(AbstractUser):
     is_verified_owner = models.BooleanField(default=False)
     trust_score = models.IntegerField(default=50) # Scale 0-100
     kyc_status = models.CharField(max_length=20, choices=KYC_STATUS_CHOICES, default='UNVERIFIED')
+    last_seen = models.DateTimeField(null=True, blank=True)
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

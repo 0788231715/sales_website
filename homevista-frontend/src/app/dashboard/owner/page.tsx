@@ -8,19 +8,38 @@ import {
 import { 
   Home, Eye, CheckCircle, TrendingUp, AlertCircle, Clock, 
   ArrowUpRight, Download, ShieldCheck, Calendar as CalendarIcon,
-  Plus, X as FiX, Image as ImageIcon
+  Plus, X as FiX, Image as ImageIcon, FileText, Send, AlertTriangle
 } from "lucide-react";
 import api from "@/utils/api";
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
+import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 export default function OwnerDashboard() {
+  const router = useRouter();
   const [stats, setStats] = useState<any>(null);
   const [requests, setRequests] = useState<any[]>([]);
+  const [bookings, setBookings] = useState<any[]>([]);
+  const [offers, setOffers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'analytics' | 'calendar' | 'requests'>('analytics');
+  const [offersLoading, setOffersLoading] = useState(true);
+  const [offerActionLoading, setOfferActionLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'analytics' | 'calendar' | 'requests' | 'bookings' | 'offers'>('analytics');
+  
+  // Modals
   const [isRequestModal, setRequestModal] = useState(false);
+  const [isExtendModal, setExtendModal] = useState(false);
+  const [isCounterModal, setCounterModal] = useState(false);
+  
+  // Selected Objects for Actions
+  const [selectedBooking, setSelectedBooking] = useState<any>(null);
+  const [selectedOffer, setSelectedOffer] = useState<any>(null);
+  
+  // Form States
+  const [extendEndDatetime, setExtendEndDatetime] = useState('');
+  const [counterData, setCounterData] = useState({ amount: "", message: "", expires_at: "" });
   const [newRequest, setNewRequest] = useState({
     title: "", price: "", currency: "USD", address: "", 
     bedrooms: 2, bathrooms: 2, size: 1000, description: ""
@@ -30,16 +49,21 @@ export default function OwnerDashboard() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [statsRes, reqsRes] = await Promise.all([
+      const [statsRes, reqsRes, offersRes] = await Promise.all([
         api.get("/analytics/owner_dashboard/"),
-        api.get("/properties/requests/")
+        api.get("/properties/requests/"),
+        api.get("/properties/offers/")
       ]);
       setStats(statsRes.data);
       setRequests(reqsRes.data.results || reqsRes.data);
+      setOffers(offersRes.data.results || offersRes.data);
+      const bookingsRes = await api.get('/bookings/');
+      setBookings(bookingsRes.data.results || bookingsRes.data);
     } catch (err) {
       console.error("Error fetching owner data:", err);
     } finally {
       setLoading(false);
+      setOffersLoading(false);
     }
   };
 
@@ -68,6 +92,129 @@ export default function OwnerDashboard() {
         setActiveTab('requests');
     } catch (err) {
         alert("Error submitting request.");
+    }
+  };
+
+  const refreshOwnerBookings = async () => {
+    try {
+      const bookingsRes = await api.get('/bookings/');
+      setBookings(bookingsRes.data.results || bookingsRes.data);
+    } catch (err) {
+      console.error('Error fetching owner bookings', err);
+    }
+  };
+
+  const handleApproveBooking = async (bookingId: number) => {
+    try {
+      await api.post(`/bookings/${bookingId}/approve/`);
+      alert('Booking approved.');
+      refreshOwnerBookings();
+    } catch (err) {
+      alert('Error approving booking.');
+    }
+  };
+
+  const handleRejectBooking = async (bookingId: number) => {
+    try {
+      await api.post(`/bookings/${bookingId}/reject/`);
+      alert('Booking rejected.');
+      refreshOwnerBookings();
+    } catch (err) {
+      alert('Error rejecting booking.');
+    }
+  };
+
+  const handleAcceptOffer = async (offer: any) => {
+    if (offer.property_details?.ownership_status !== 'VERIFIED') {
+      alert("Property must be VERIFIED before you can accept an offer. Please upload ownership documents.");
+      router.push(`/dashboard/owner/verify-property/${offer.property}`);
+      return;
+    }
+    
+    try {
+      setOfferActionLoading(true);
+      await api.post(`/properties/offers/${offer.id}/accept/`);
+      alert('Offer accepted.');
+      fetchData();
+    } catch (err: any) {
+      alert(err.response?.data?.error || 'Error accepting offer.');
+    } finally {
+      setOfferActionLoading(false);
+    }
+  };
+
+  const handleRejectOffer = async (offerId: number) => {
+    try {
+      setOfferActionLoading(true);
+      await api.post(`/properties/offers/${offerId}/reject/`);
+      alert('Offer rejected.');
+      fetchData();
+    } catch (err) {
+      alert('Error rejecting offer.');
+    } finally {
+      setOfferActionLoading(false);
+    }
+  };
+
+  const handleOpenCounter = (offer: any) => {
+    setSelectedOffer(offer);
+    setCounterData({
+      amount: offer.amount,
+      message: "",
+      expires_at: ""
+    });
+    setCounterModal(true);
+  };
+
+  const handleCounterOffer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedOffer) return;
+    try {
+      setOfferActionLoading(true);
+      await api.post(`/properties/offers/${selectedOffer.id}/counter/`, {
+        amount: parseFloat(counterData.amount),
+        message: counterData.message,
+        expires_at: counterData.expires_at || null
+      });
+      alert('Counter-offer submitted.');
+      setCounterModal(false);
+      fetchData();
+    } catch (err) {
+      alert('Error submitting counter-offer.');
+    } finally {
+      setOfferActionLoading(false);
+    }
+  };
+
+  const handleCancelBooking = async (bookingId: number) => {
+    if (!confirm('Are you sure you want to cancel this booking?')) return;
+    try {
+      await api.post(`/bookings/${bookingId}/cancel/`);
+      alert('Booking cancelled.');
+      refreshOwnerBookings();
+    } catch (err) {
+      alert('Error cancelling booking.');
+    }
+  };
+
+  const handleOpenExtend = (booking: any) => {
+    setSelectedBooking(booking);
+    setExtendEndDatetime(booking.end_datetime?.slice(0, 16) || '');
+    setExtendModal(true);
+  };
+
+  const handleExtendBooking = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedBooking) return;
+    try {
+      await api.post(`/bookings/${selectedBooking.id}/extend/`, {
+        end_datetime: new Date(extendEndDatetime).toISOString()
+      });
+      alert('Booking extended successfully.');
+      setExtendModal(false);
+      refreshOwnerBookings();
+    } catch (err) {
+      alert('Error extending booking.');
     }
   };
 
@@ -109,6 +256,18 @@ export default function OwnerDashboard() {
                     className={`pb-2 px-2 font-medium transition ${activeTab === 'requests' ? 'text-accent border-b-2 border-accent' : 'text-foreground/50 hover:text-foreground'}`}
                 >
                     Listing Requests
+                </button>
+                <button 
+                    onClick={() => setActiveTab('bookings')}
+                    className={`pb-2 px-2 font-medium transition ${activeTab === 'bookings' ? 'text-accent border-b-2 border-accent' : 'text-foreground/50 hover:text-foreground'}`}
+                >
+                    Booking Management
+                </button>
+                <button 
+                    onClick={() => setActiveTab('offers')}
+                    className={`pb-2 px-2 font-medium transition ${activeTab === 'offers' ? 'text-accent border-b-2 border-accent' : 'text-foreground/50 hover:text-foreground'}`}
+                >
+                    Offers
                 </button>
             </div>
         </div>
@@ -208,6 +367,183 @@ export default function OwnerDashboard() {
                 </div>
             </div>
         </>
+      ) : activeTab === 'bookings' ? (
+        <div className="glass p-8 rounded-3xl shadow-xl border border-foreground/10">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+                <div>
+                    <h2 className="text-xl font-bold text-foreground">Booking Management</h2>
+                    <p className="text-foreground/50">Approve, reject, extend, and cancel owner bookings.</p>
+                </div>
+                <button
+                    onClick={refreshOwnerBookings}
+                    className="px-4 py-2 bg-accent text-primary-dark rounded-lg hover:opacity-90 transition"
+                >
+                    Refresh Bookings
+                </button>
+            </div>
+            {bookings.length === 0 ? (
+                <div className="text-center py-20 text-foreground/30 italic">
+                    No owner bookings found yet. Bookings will appear here once submitted by tenants.
+                </div>
+            ) : (
+                <div className="space-y-6">
+                    {bookings.map((booking: any) => (
+                        <div key={booking.id} className="p-6 glass rounded-3xl border border-foreground/10 grid grid-cols-1 lg:grid-cols-[1.5fr,0.5fr] gap-6">
+                            <div className="space-y-3">
+                                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                    <div>
+                                        <h3 className="text-lg font-bold text-foreground">{booking.property?.title || 'Unknown Property'}</h3>
+                                        <p className="text-sm text-foreground/60">{booking.customer?.full_name || booking.customer?.email}</p>
+                                    </div>
+                                    <span className={`px-3 py-1 rounded-full text-xs font-semibold uppercase ${booking.status === 'APPROVED' ? 'bg-green-500/10 text-green-500' : booking.status === 'PENDING' ? 'bg-yellow-500/10 text-yellow-500' : 'bg-red-500/10 text-red-500'}`}>
+                                        {booking.status}
+                                    </span>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm text-foreground/60">
+                                    <div>
+                                        <p><span className="font-semibold text-foreground">From:</span> {new Date(booking.start_datetime).toLocaleString()}</p>
+                                        <p><span className="font-semibold text-foreground">To:</span> {new Date(booking.end_datetime).toLocaleString()}</p>
+                                    </div>
+                                    <div>
+                                        <p><span className="font-semibold text-foreground">Total:</span> {booking.currency} {parseFloat(booking.total_price || '0').toLocaleString()}</p>
+                                        <p><span className="font-semibold text-foreground">Created:</span> {new Date(booking.created_at).toLocaleDateString()}</p>
+                                    </div>
+                                </div>
+                                {booking.customer_message && (
+                                    <div className="bg-foreground/5 p-4 rounded-2xl border border-foreground/10 text-sm text-foreground/70">
+                                        <span className="font-semibold text-foreground">Message:</span> {booking.customer_message}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="flex flex-col gap-3 justify-between">
+                                <div className="grid grid-cols-1 gap-3">
+                                    {booking.status === 'PENDING' && (
+                                        <>
+                                            <button
+                                                onClick={() => handleApproveBooking(booking.id)}
+                                                className="w-full px-4 py-3 bg-green-500 text-white rounded-2xl hover:bg-green-600 transition font-semibold"
+                                            >
+                                                Approve
+                                            </button>
+                                            <button
+                                                onClick={() => handleRejectBooking(booking.id)}
+                                                className="w-full px-4 py-3 bg-red-500 text-white rounded-2xl hover:bg-red-600 transition font-semibold"
+                                            >
+                                                Reject
+                                            </button>
+                                        </>
+                                    )}
+                                    <button
+                                        onClick={() => handleCancelBooking(booking.id)}
+                                        className="w-full px-4 py-3 bg-foreground/10 text-foreground rounded-2xl hover:bg-foreground/20 transition font-semibold"
+                                    >
+                                        Cancel Booking
+                                    </button>
+                                    <button
+                                        onClick={() => handleOpenExtend(booking)}
+                                        className="w-full px-4 py-3 bg-accent text-primary-dark rounded-2xl hover:opacity-90 transition font-semibold"
+                                    >
+                                        Extend Booking
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+      ) : activeTab === 'offers' ? (
+        <div className="glass p-8 rounded-3xl shadow-xl border border-foreground/10">
+            <div className="flex flex-col md:flex-row md:justify-between gap-4 mb-8">
+                <div>
+                    <h2 className="text-xl font-bold text-foreground">Offer Management</h2>
+                    <p className="text-foreground/50">Review incoming and outgoing sale offers from interested buyers.</p>
+                </div>
+                <button
+                    onClick={fetchData}
+                    className="px-4 py-2 bg-accent text-primary-dark rounded-lg hover:opacity-90 transition"
+                >
+                    Refresh Offers
+                </button>
+            </div>
+            {offersLoading ? (
+                <div className="text-center py-20 text-foreground/50">Loading offers...</div>
+            ) : offers.length === 0 ? (
+                <div className="text-center py-20 text-foreground/30 italic">No offers found yet. Offers appear here once buyers submit them.</div>
+            ) : (
+                <div className="space-y-6">
+                    {offers.map((offer: any) => (
+                        <div key={offer.id} className="p-6 glass rounded-3xl border border-foreground/10 grid grid-cols-1 lg:grid-cols-[1.7fr,0.8fr] gap-6">
+                            <div className="space-y-3">
+                                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                    <div>
+                                        <h3 className="text-lg font-bold text-foreground">{offer.property_details?.title || 'Unnamed Property'}</h3>
+                                        <p className="text-sm text-foreground/60">Buyer: {offer.buyer_details?.full_name || offer.buyer_details?.email}</p>
+                                    </div>
+                                    <div className="flex flex-col items-end gap-2">
+                                        <span className={`px-3 py-1 rounded-full text-xs font-semibold uppercase ${offer.status === 'PENDING' ? 'bg-amber-500/10 text-amber-500' : offer.status === 'ACCEPTED' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
+                                            {offer.status}
+                                        </span>
+                                        <span className={`px-3 py-1 rounded-full text-[10px] font-black tracking-widest uppercase flex items-center gap-1 ${offer.property_details?.ownership_status === 'VERIFIED' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-rose-500/10 text-rose-500'}`}>
+                                            {offer.property_details?.ownership_status === 'VERIFIED' ? <ShieldCheck size={12}/> : <AlertTriangle size={12}/>}
+                                            {offer.property_details?.ownership_status || 'UNVERIFIED'}
+                                        </span>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-4 text-sm text-foreground/60">
+                                    <div>
+                                        <p><span className="font-semibold text-foreground">Offer:</span> {offer.currency} {parseFloat(offer.amount).toLocaleString()}</p>
+                                        <p><span className="font-semibold text-foreground">Expires:</span> {offer.expires_at ? new Date(offer.expires_at).toLocaleDateString() : 'No expiry'}</p>
+                                    </div>
+                                    <div>
+                                        <p><span className="font-semibold text-foreground">Submitted:</span> {new Date(offer.created_at).toLocaleDateString()}</p>
+                                        <p><span className="font-semibold text-foreground">Property Type:</span> {offer.property_details?.property_type || 'N/A'}</p>
+                                    </div>
+                                </div>
+                                <p className="text-sm text-foreground/70">{offer.message || 'No message provided.'}</p>
+                                {offer.property_details?.ownership_status !== 'VERIFIED' && (
+                                    <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-2xl flex items-center justify-between gap-4">
+                                        <p className="text-xs text-rose-500 font-bold uppercase tracking-wider">Property verification required to accept offers.</p>
+                                        <Link href={`/dashboard/owner/verify-property/${offer.property}`} className="text-xs font-black text-rose-500 border-b border-rose-500 hover:text-rose-600 transition-colors uppercase tracking-widest shrink-0">Verify Now</Link>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="flex flex-col justify-between gap-4">
+                                {offer.status === 'PENDING' && (
+                                    <div className="grid grid-cols-1 gap-3">
+                                        <button 
+                                            onClick={() => handleAcceptOffer(offer)} 
+                                            disabled={offerActionLoading || offer.property_details?.ownership_status !== 'VERIFIED'} 
+                                            className="w-full px-4 py-3 bg-green-500 text-white rounded-2xl hover:bg-green-600 transition font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            Accept
+                                        </button>
+                                        <button 
+                                            onClick={() => handleOpenCounter(offer)} 
+                                            disabled={offerActionLoading} 
+                                            className="w-full px-4 py-3 bg-accent text-primary-dark rounded-2xl hover:opacity-90 transition font-semibold"
+                                        >
+                                            Counter Offer
+                                        </button>
+                                        <button 
+                                            onClick={() => handleRejectOffer(offer.id)} 
+                                            disabled={offerActionLoading} 
+                                            className="w-full px-4 py-3 bg-red-500 text-white rounded-2xl hover:bg-red-600 transition font-semibold"
+                                        >
+                                            Reject
+                                        </button>
+                                    </div>
+                                )}
+                                <div className="p-4 bg-foreground/5 rounded-3xl border border-foreground/10 text-sm text-foreground/70">
+                                    <p><span className="font-semibold text-foreground">Buyer Email:</span> {offer.buyer_details?.email || 'N/A'}</p>
+                                    <p><span className="font-semibold text-foreground">Seller:</span> {offer.seller_details?.full_name || offer.seller_details?.email}</p>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
       ) : activeTab === 'calendar' ? (
         <div className="glass p-8 rounded-3xl shadow-xl border border-foreground/10">
             <div className="flex justify-between items-center mb-8">
@@ -348,6 +684,85 @@ export default function OwnerDashboard() {
                           )}
                       </div>
                       <button type="submit" className="col-span-2 py-4 bg-accent text-primary-dark rounded-2xl font-bold hover:opacity-90 transition shadow-xl mt-4 uppercase tracking-widest">Submit Request to Admin</button>
+                  </form>
+              </div>
+          </div>
+      )}
+      {isExtendModal && selectedBooking && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-primary-dark/80 backdrop-blur-md">
+              <div className="bg-background w-full max-w-xl rounded-[2.5rem] shadow-2xl p-10 overflow-y-auto max-h-[90vh] border border-foreground/10">
+                  <div className="flex justify-between items-center mb-8">
+                      <div>
+                          <h2 className="text-2xl font-bold text-foreground">Extend Booking</h2>
+                          <p className="text-sm text-foreground/60">Booking for {selectedBooking.property?.title || 'property'}</p>
+                      </div>
+                      <button onClick={() => setExtendModal(false)} className="p-2 hover:bg-foreground/5 rounded-full text-foreground/30"><FiX size={24}/></button>
+                  </div>
+                  <form onSubmit={handleExtendBooking} className="space-y-6">
+                      <div>
+                          <label className="text-xs font-bold text-foreground/40 uppercase">New End Date & Time</label>
+                          <input
+                              type="datetime-local"
+                              value={extendEndDatetime}
+                              onChange={e => setExtendEndDatetime(e.target.value)}
+                              className="w-full mt-2 bg-foreground/5 border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-accent outline-none text-foreground"
+                              required
+                          />
+                      </div>
+                      <button type="submit" className="w-full py-4 bg-accent text-primary-dark rounded-2xl font-bold hover:opacity-90 transition uppercase tracking-widest">Submit Extension</button>
+                  </form>
+              </div>
+          </div>
+      )}
+      {isCounterModal && selectedOffer && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-primary-dark/80 backdrop-blur-md">
+              <div className="bg-background w-full max-w-xl rounded-[2.5rem] shadow-2xl p-10 overflow-y-auto max-h-[90vh] border border-foreground/10">
+                  <div className="flex justify-between items-center mb-8 border-b border-foreground/5 pb-6">
+                      <div>
+                          <h2 className="text-2xl font-bold text-foreground">Counter Offer</h2>
+                          <p className="text-sm text-foreground/60">Negotiating for {selectedOffer.property_details?.title}</p>
+                      </div>
+                      <button onClick={() => setCounterModal(false)} className="p-2 hover:bg-foreground/5 rounded-full text-foreground/30"><FiX size={24}/></button>
+                  </div>
+                  <form onSubmit={handleCounterOffer} className="space-y-6 pt-6">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label className="text-xs font-bold text-foreground/40 uppercase">Original Offer</label>
+                            <p className="mt-2 text-xl font-bold text-foreground/30">{selectedOffer.currency} {parseFloat(selectedOffer.amount).toLocaleString()}</p>
+                        </div>
+                        <div>
+                            <label className="text-xs font-bold text-foreground/40 uppercase text-accent">Counter Amount</label>
+                            <input
+                                type="number"
+                                value={counterData.amount}
+                                onChange={e => setCounterData({...counterData, amount: e.target.value})}
+                                className="w-full mt-2 bg-foreground/5 border border-accent/20 rounded-xl px-4 py-3 focus:ring-2 focus:ring-accent outline-none text-foreground font-bold"
+                                required
+                            />
+                        </div>
+                      </div>
+                      <div>
+                          <label className="text-xs font-bold text-foreground/40 uppercase">Expiration Date (Optional)</label>
+                          <input
+                              type="date"
+                              value={counterData.expires_at}
+                              onChange={e => setCounterData({...counterData, expires_at: e.target.value})}
+                              className="w-full mt-2 bg-foreground/5 border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-accent outline-none text-foreground"
+                          />
+                      </div>
+                      <div>
+                          <label className="text-xs font-bold text-foreground/40 uppercase">Message to Buyer</label>
+                          <textarea
+                              rows={3}
+                              value={counterData.message}
+                              onChange={e => setCounterData({...counterData, message: e.target.value})}
+                              className="w-full mt-2 bg-foreground/5 border-none rounded-xl px-4 py-3 focus:ring-2 focus:ring-accent outline-none text-foreground resize-none"
+                              placeholder="Explain your counter-offer terms..."
+                          />
+                      </div>
+                      <button type="submit" disabled={offerActionLoading} className="w-full py-4 bg-accent text-primary-dark rounded-2xl font-bold hover:opacity-90 transition uppercase tracking-widest flex items-center justify-center gap-2">
+                          <Send size={18}/> {offerActionLoading ? "Sending..." : "Submit Counter Offer"}
+                      </button>
                   </form>
               </div>
           </div>

@@ -20,6 +20,13 @@ class PropertyInteraction(models.Model):
     def __str__(self):
         return f"{self.interaction_type} on {self.property.title} at {self.timestamp}"
 
+    class Meta:
+        indexes = [
+            models.Index(fields=['property']),
+            models.Index(fields=['interaction_type']),
+            models.Index(fields=['timestamp']),
+        ]
+
 class UserPreference(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='preferences')
     preferred_locations = models.JSONField(default=list)

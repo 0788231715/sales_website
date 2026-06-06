@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 from django.db.models import Count, Sum, Avg, F
 from django.db.models.functions import TruncDate
+from django.utils import timezone
 from .models import PropertyInteraction, UserPreference
 from .serializers import PropertyInteractionSerializer, UserPreferenceSerializer
 from properties.models import Property, PropertyListingRequest
@@ -16,18 +17,34 @@ class PropertyInteractionViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         user = self.request.user if self.request.user.is_authenticated else None
+        ip_address = self.request.META.get('REMOTE_ADDR')
+        interaction_type = self.request.data.get('interaction_type', 'VIEW')
+        prop_id = self.request.data.get('property')
+        if interaction_type == 'VIEW' and prop_id:
+            exists = PropertyInteraction.objects.filter(
+                property_id=prop_id,
+                interaction_type='VIEW',
+                timestamp__date=timezone.now().date()
+            )
+            if user:
+                exists = exists.filter(user=user)
+            else:
+                exists = exists.filter(ip_address=ip_address)
+
+            if not exists.exists():
+                serializer.save(
+                    user=user,
+                    ip_address=ip_address,
+                    user_agent=self.request.META.get('HTTP_USER_AGENT', ''),
+                )
+                Property.objects.filter(id=prop_id).update(views_count=F('views_count') + 1)
+                return
+
         serializer.save(
             user=user,
-            ip_address=self.request.META.get('REMOTE_ADDR'),
-            user_agent=self.request.META.get('HTTP_USER_AGENT')
+            ip_address=ip_address,
+            user_agent=self.request.META.get('HTTP_USER_AGENT', ''),
         )
-        
-        # Increment property view count if it's a VIEW interaction
-        interaction_type = self.request.data.get('interaction_type', 'VIEW')
-        if interaction_type == 'VIEW':
-            prop_id = self.request.data.get('property')
-            if prop_id:
-                Property.objects.filter(id=prop_id).update(views_count=F('views_count') + 1)
 
 class AnalyticsViewSet(viewsets.ViewSet):
     permission_classes = [permissions.IsAuthenticated]
@@ -55,8 +72,29 @@ class AnalyticsViewSet(viewsets.ViewSet):
         # 4. Property Ranking
         property_ranking = user_properties.values('title', 'views_count').order_by('-views_count')[:5]
         
+        unique_views = PropertyInteraction.objects.filter(
+            property_id__in=property_ids,
+            interaction_type='VIEW'
+        ).values('property_id', 'user', 'ip_address').distinct().count()
+
+        daily_views = PropertyInteraction.objects.filter(
+            property_id__in=property_ids,
+            interaction_type='VIEW',
+            timestamp__date=timezone.now().date()
+        ).count()
+
+        monthly_views = PropertyInteraction.objects.filter(
+            property_id__in=property_ids,
+            interaction_type='VIEW',
+            timestamp__month=timezone.now().month,
+            timestamp__year=timezone.now().year
+        ).count()
+
         return Response({
             "total_views": total_views,
+            "unique_views": unique_views,
+            "daily_views": daily_views,
+            "monthly_views": monthly_views,
             "total_bookings": total_bookings,
             "conversion_rate": round(conversion_rate, 2),
             "daily_interactions": daily_interactions,

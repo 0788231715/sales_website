@@ -5,6 +5,7 @@ from .serializers import BookingSerializer
 from rest_framework.decorators import action
 from notifications.models import Notification
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 
 User = get_user_model()
 
@@ -15,11 +16,12 @@ class BookingViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
+        queryset = Booking.objects.select_related('property', 'customer', 'property__owner')
         if user.role == 'ADMIN':
-            return Booking.objects.all()
+            return queryset
         elif user.role == 'OWNER':
-            return Booking.objects.filter(property__owner=user)
-        return Booking.objects.filter(customer=user)
+            return queryset.filter(property__owner=user)
+        return queryset.filter(customer=user)
 
     def perform_create(self, serializer):
         serializer.save(customer=self.request.user)
@@ -65,6 +67,83 @@ class BookingViewSet(viewsets.ModelViewSet):
             "owner_confirmed": booking.owner_confirmed,
             "customer_confirmed": booking.customer_confirmed
         })
+
+    @action(detail=True, methods=['post'])
+    def approve(self, request, pk=None):
+        booking = self.get_object()
+        if request.user != booking.property.owner and request.user.role != 'ADMIN':
+            return Response({"error": "Unauthorized"}, status=403)
+
+        if booking.status in ['CANCELLED', 'COMPLETED', 'REJECTED']:
+            return Response({"error": "Booking cannot be approved in its current state."}, status=400)
+
+        booking.status = 'APPROVED'
+        booking.save()
+        Notification.objects.create(
+            user=booking.customer,
+            title="Booking Approved",
+            body=f"Your booking for {booking.property.title} has been approved by the owner."
+        )
+        return Response({"status": "Booking approved", "property_status": booking.property.status})
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        booking = self.get_object()
+        if request.user != booking.property.owner and request.user.role != 'ADMIN':
+            return Response({"error": "Unauthorized"}, status=403)
+
+        booking.status = 'REJECTED'
+        booking.save()
+        Notification.objects.create(
+            user=booking.customer,
+            title="Booking Rejected",
+            body=f"Your booking request for {booking.property.title} has been rejected."
+        )
+        return Response({"status": "Booking rejected", "property_status": booking.property.status})
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        booking = self.get_object()
+        if request.user not in [booking.property.owner, booking.customer] and request.user.role != 'ADMIN':
+            return Response({"error": "Unauthorized"}, status=403)
+
+        if booking.status in ['CANCELLED', 'COMPLETED', 'REJECTED']:
+            return Response({"error": "Booking cannot be cancelled."}, status=400)
+
+        booking.status = 'CANCELLED'
+        booking.save()
+        Notification.objects.create(
+            user=booking.property.owner if request.user == booking.customer else booking.customer,
+            title="Booking Cancelled",
+            body=f"The booking for {booking.property.title} has been cancelled."
+        )
+        return Response({"status": "Booking cancelled", "property_status": booking.property.status})
+
+    @action(detail=True, methods=['post'])
+    def extend(self, request, pk=None):
+        booking = self.get_object()
+        if request.user != booking.property.owner and request.user.role != 'ADMIN':
+            return Response({"error": "Unauthorized"}, status=403)
+
+        new_end = request.data.get('end_datetime')
+        if not new_end:
+            return Response({"error": "end_datetime is required"}, status=400)
+
+        try:
+            booking.end_datetime = timezone.datetime.fromisoformat(new_end)
+        except ValueError:
+            return Response({"error": "Invalid datetime format. Use ISO 8601."}, status=400)
+
+        if booking.end_datetime <= booking.start_datetime:
+            return Response({"error": "New end time must be after current start time."}, status=400)
+
+        booking.save()
+        Notification.objects.create(
+            user=booking.customer,
+            title="Booking Extended",
+            body=f"The owner has extended your booking for {booking.property.title}."
+        )
+        return Response({"status": "Booking extended", "end_datetime": booking.end_datetime})
 
     @action(detail=True, methods=['post'])
     def approve_payment(self, request, pk=None):

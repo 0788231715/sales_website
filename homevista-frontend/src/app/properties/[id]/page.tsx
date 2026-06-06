@@ -1,13 +1,13 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import api from "@/utils/api";
 import { 
   FiMapPin, FiMaximize, FiUser, FiCalendar, 
   FiMessageCircle, FiHeart, FiShare2, FiCheckCircle,
-  FiX, FiChevronLeft, FiChevronRight, FiGrid, FiDollarSign, FiPercent, FiClock
+  FiX, FiChevronLeft, FiChevronRight, FiGrid, FiDollarSign, FiPercent, FiClock, FiSend
 } from "react-icons/fi";
 import { useAuth } from "@/context/AuthContext";
 import dynamic from "next/dynamic";
@@ -30,9 +30,31 @@ export default function PropertyDetailPage() {
   const [isBookingModal, setIsBookingModal] = useState(false);
   const [isMortgageModal, setIsMortgageModal] = useState(false);
   const [isChatModal, setIsChatModal] = useState(false);
+  const [socket, setSocket] = useState<WebSocket | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
+  const [chatMessages, setChatMessages] = useState<any[]>([]);
+  const [chatDraft, setChatDraft] = useState("");
+  const [socketConnected, setSocketConnected] = useState(false);
+  const [typingIndicator, setTypingIndicator] = useState(false);
+  const [isOwnerOnline, setIsOwnerOnline] = useState(false);
+  const [ownerLastSeen, setOwnerLastSeen] = useState<string | null>(null);
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const [bookingCountdown, setBookingCountdown] = useState<string | null>(null);
+  const [socketKey, setSocketKey] = useState(0);
+  const [loadingChatHistory, setLoadingChatHistory] = useState(false);
+  const [messageStatusMap, setMessageStatusMap] = useState<Record<string, string>>({});
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const typingTimerRef = useRef<number | null>(null);
 
   // Booking Form State
   const [bookingData, setBookingData] = useState({ date: "", time: "10:00", notes: "" });
+  const [isOfferModal, setIsOfferModal] = useState(false);
+  const [offerData, setOfferData] = useState({ amount: "", message: "", expires_at: "" });
+  const [offerError, setOfferError] = useState<string | null>(null);
+  const [offerSubmitting, setOfferSubmitting] = useState(false);
+  const [offers, setOffers] = useState<any[]>([]);
+  const [offersLoading, setOffersLoading] = useState(false);
 
   // Mortgage Calculator State
   const [mortgage, setMortgage] = useState({ downPayment: 20, interestRate: 5, term: 30 });
@@ -50,18 +72,226 @@ export default function PropertyDetailPage() {
     }
   };
 
+  const fetchOffers = async () => {
+    if (!id || !user) return;
+    setOffersLoading(true);
+    try {
+      const response = await api.get('/properties/offers/', {
+        params: { property: id }
+      });
+      setOffers(response.data.results || response.data);
+    } catch (error) {
+      console.error('Error fetching offers', error);
+    } finally {
+      setOffersLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchData();
   }, [id]);
 
+  useEffect(() => {
+    if (property && user) {
+      fetchOffers();
+    }
+  }, [property, user]);
+
+  const scrollChatToBottom = () => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const refreshBookingCountdown = () => {
+    if (!property?.current_booking?.start_datetime || !property?.current_booking?.end_datetime) {
+      setBookingCountdown(null);
+      return;
+    }
+
+    const now = new Date();
+    const start = new Date(property.current_booking.start_datetime);
+    const end = new Date(property.current_booking.end_datetime);
+
+    if (now < start) {
+      setBookingCountdown(`Starts on ${start.toLocaleString()}`);
+      return;
+    }
+
+    if (now < end) {
+      const diff = end.getTime() - now.getTime();
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      if (days > 0) {
+        setBookingCountdown(`Booked for ${days} Days`);
+      } else if (hours > 0) {
+        setBookingCountdown(`Booked for ${hours} Hours`);
+      } else {
+        setBookingCountdown(`Booked for ${minutes} Minutes`);
+      }
+      return;
+    }
+
+    setBookingCountdown(`Booked until ${end.toLocaleDateString()}`);
+  };
+
+  useEffect(() => {
+    refreshBookingCountdown();
+    const timer = window.setInterval(refreshBookingCountdown, 15000);
+    return () => window.clearInterval(timer);
+  }, [property?.current_booking]);
+
+  const fetchChatHistory = async () => {
+    if (!user || !property?.owner?.id) return;
+    setLoadingChatHistory(true);
+    try {
+      const response = await api.get('/chat/');
+      const data = response.data.results || response.data;
+      const conversation = data.filter((message: any) => {
+        return (
+          (message.sender === property.owner.id && message.receiver === user.id) ||
+          (message.sender === user.id && message.receiver === property.owner.id)
+        );
+      });
+      setChatMessages(conversation.sort((a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()));
+      setMessageStatusMap(Object.fromEntries(conversation.filter((message: any) => message.sender === user.id).map((message: any) => [String(message.id), message.status])));
+      setTimeout(() => scrollChatToBottom(), 100);
+
+      const unreadFromOwner = conversation.filter((message: any) => message.sender === property.owner.id && message.status !== 'READ');
+      unreadFromOwner.forEach((message: any) => {
+        if (socketRef.current?.readyState === WebSocket.OPEN) {
+          socketRef.current.send(JSON.stringify({ action: 'read_message', message_id: message.id }));
+        }
+      });
+    } catch (error) {
+      console.error('Error loading chat history', error);
+    } finally {
+      setLoadingChatHistory(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isChatModal || !user || !property?.owner?.id) {
+      if (socketRef.current) {
+        socketRef.current.close();
+        socketRef.current = null;
+        setSocket(null);
+      }
+      setIsReconnecting(false);
+      return;
+    }
+
+    fetchChatHistory();
+
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api';
+    const host = apiUrl.replace(/^https?:\/\//, '').replace(/\/api$/, '');
+    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const token = localStorage.getItem('access_token');
+    const socketUrl = `${protocol}://${host}/ws/chat/?token=${token}`;
+
+    const ws = new WebSocket(socketUrl);
+    socketRef.current = ws;
+    setSocket(ws);
+
+    ws.onopen = () => {
+      setSocketConnected(true);
+      setIsReconnecting(false);
+    };
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === 'chat_message') {
+        setChatMessages((prev) => [...prev, data]);
+        if (data.sender_id === property.owner.id && socketRef.current?.readyState === WebSocket.OPEN) {
+          socketRef.current.send(JSON.stringify({ action: 'read_message', message_id: data.message_id }));
+        }
+      }
+      if (data.type === 'presence_update' && data.user_id === property.owner.id) {
+        setIsOwnerOnline(data.online);
+        setOwnerLastSeen(data.last_seen || null);
+      }
+      if (data.type === 'typing_indicator' && data.sender_id === property.owner.id) {
+        setTypingIndicator(true);
+        if (typingTimerRef.current) {
+          window.clearTimeout(typingTimerRef.current);
+        }
+        typingTimerRef.current = window.setTimeout(() => setTypingIndicator(false), 1800);
+      }
+      if (data.type === 'message_status') {
+        setMessageStatusMap((prev) => ({ ...prev, [String(data.message_id)]: data.status }));
+      }
+    };
+
+    ws.onclose = () => {
+      setSocketConnected(false);
+      setSocket(null);
+      socketRef.current = null;
+      if (isChatModal) {
+        setIsReconnecting(true);
+        reconnectTimerRef.current = window.setTimeout(() => {
+          if (isChatModal) {
+            setSocketKey((prev) => prev + 1);
+          }
+        }, 2500);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error('Chat socket error', error);
+    };
+
+    return () => {
+      ws.close();
+      if (reconnectTimerRef.current) {
+        window.clearTimeout(reconnectTimerRef.current);
+      }
+      if (typingTimerRef.current) {
+        window.clearTimeout(typingTimerRef.current);
+      }
+    };
+  }, [isChatModal, user, property?.owner?.id, socketKey]);
+
+  const sendChatMessage = (message: string) => {
+    if (!socketRef.current || !property?.owner?.id || !message.trim()) return;
+    socketRef.current.send(JSON.stringify({ message, receiver_id: property.owner.id }));
+    setChatMessages((prev) => [...prev, { id: `local-${Date.now()}`, message, sender_id: user?.id, receiver_id: property.owner.id, timestamp: new Date().toISOString(), status: 'SENT' }]);
+  };
+
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return router.push("/account");
+    if (!socketConnected) {
+      alert("Chat connection is currently unavailable. Please try again in a moment.");
+      return;
+    }
+    sendChatMessage(chatDraft);
+    setChatDraft("");
+    setTimeout(() => scrollChatToBottom(), 100);
+  };
+
+  const handleChatInputChange = (value: string) => {
+    setChatDraft(value);
+    if (socketRef.current?.readyState === WebSocket.OPEN && property?.owner?.id) {
+      socketRef.current.send(JSON.stringify({ action: 'typing', receiver_id: property.owner.id }));
+    }
+  };
+
+  const handleCloseChat = () => {
+    setIsChatModal(false);
+    if (socketRef.current) {
+      socketRef.current.close();
+      socketRef.current = null;
+      setSocket(null);
+    }
+  };
+
   const handleToggleFavorite = async () => {
     if (!user) return router.push("/account");
     try {
-        const res = await api.post(`/properties/${id}/toggle_favorite/`);
-        setIsFavorite(res.data.is_favorite);
-        setFavoritesCount(prev => res.data.is_favorite ? prev + 1 : prev - 1);
+      const res = await api.post(`/properties/${id}/toggle_favorite/`);
+      setIsFavorite(res.data.is_favorite);
+      setFavoritesCount(prev => res.data.is_favorite ? prev + 1 : prev - 1);
     } catch (err) {
-        alert("Failed to update favorite status.");
+      alert("Failed to update favorite status.");
     }
   };
 
@@ -100,21 +330,37 @@ export default function PropertyDetailPage() {
     }
   };
 
-  const handleSendMessage = async (e: React.FormEvent) => {
+  const handleSubmitOffer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return router.push("/account");
-    const message = (e.target as any).message.value;
+    setOfferSubmitting(true);
+    setOfferError(null);
+
     try {
-        await api.post("/chat/", {
-            receiver: property.owner.id,
-            content: message
-        });
-        alert("Message sent to owner!");
-        setIsChatModal(false);
-    } catch (err) {
-        alert("Failed to send message.");
+      await api.post('/properties/offers/', {
+        property: id,
+        amount: Number(offerData.amount),
+        message: offerData.message,
+        expires_at: offerData.expires_at || null,
+      });
+      alert('Offer submitted. The seller will review it shortly.');
+      setIsOfferModal(false);
+      setOfferData({ amount: '', message: '', expires_at: '' });
+      fetchOffers();
+    } catch (err: any) {
+      setOfferError(
+        err.response?.data?.amount ||
+        err.response?.data?.non_field_errors?.[0] ||
+        err.response?.data?.buyer ||
+        err.response?.data?.property ||
+        'Failed to submit offer.'
+      );
+    } finally {
+      setOfferSubmitting(false);
     }
   };
+
+  const canMakeOffer = property?.property_type !== 'RENT' && !['SOLD', 'CANCELLED', 'EXPIRED'].includes(property?.status);
 
   // Calculator Logic
   const calculateMonthly = () => {
@@ -223,9 +469,32 @@ export default function PropertyDetailPage() {
           >
             <div>
                <h1 className="text-6xl font-serif mb-6 text-foreground leading-[1.1]">{property.title}</h1>
-               <div className="flex items-center text-foreground/50 text-xl font-light">
-                 <FiMapPin className="text-accent mr-3" /> {property.address}
+               <div className="flex flex-col sm:flex-row sm:items-center sm:gap-4 gap-3 text-foreground/50 text-xl font-light">
+                 <span className="flex items-center gap-3">
+                   <FiMapPin className="text-accent" /> {property.address}
+                 </span>
+                 <span className={`inline-flex items-center px-4 py-2 rounded-full text-sm font-semibold ${property.status === 'AVAILABLE' ? 'bg-emerald-500/10 text-emerald-500' : property.status === 'BOOKED' ? 'bg-amber-500/10 text-amber-500' : 'bg-rose-500/10 text-rose-500'}`}>
+                   {property.status_label || property.status}
+                 </span>
                </div>
+               {property.status === 'BOOKED' && (
+                 <div className="mt-4 text-lg font-medium text-accent">
+                   {bookingCountdown || property.current_booking?.duration_text}
+                 </div>
+               )}
+               {property.latitude && property.longitude && (
+                 <div className="mt-4 flex flex-col gap-2 text-sm text-foreground/60">
+                   <div>Coordinates: {property.latitude.toFixed(5)}, {property.longitude.toFixed(5)}</div>
+                   <div className="flex flex-wrap gap-3">
+                     <a target="_blank" rel="noreferrer" className="text-accent hover:underline" href={`https://maps.google.com?q=${property.latitude},${property.longitude}`}>
+                       Open in Google Maps
+                     </a>
+                     <a target="_blank" rel="noreferrer" className="text-accent hover:underline" href={`https://maps.apple.com/?ll=${property.latitude},${property.longitude}`}>
+                       Open in Apple Maps
+                     </a>
+                   </div>
+                 </div>
+               )}
             </div>
             <div className="flex gap-4">
                <motion.button 
@@ -289,7 +558,10 @@ export default function PropertyDetailPage() {
                    </div>
                 </div>
                 <button 
-                    onClick={() => setIsChatModal(true)}
+                    onClick={() => {
+                        if (!user) return router.push("/account");
+                        setIsChatModal(true);
+                    }}
                     className="bg-primary-dark text-luxury-white px-8 py-4 rounded-2xl flex items-center gap-3 hover:bg-accent hover:text-primary-dark transition-all font-bold shadow-lg uppercase tracking-widest text-sm"
                 >
                    <FiMessageCircle size={20} /> INITIATE CHAT
@@ -325,6 +597,14 @@ export default function PropertyDetailPage() {
                 >
                    <FiCalendar size={20}/> SECURE A VIEWING
                 </button>
+                {canMakeOffer && user?.id !== property.owner?.id && (
+                  <button 
+                      onClick={() => setIsOfferModal(true)}
+                      className="w-full bg-foreground/5 border border-foreground/10 text-foreground font-bold py-6 rounded-[2rem] hover:bg-foreground/10 transition-all uppercase tracking-widest text-xs"
+                  >
+                     MAKE AN OFFER
+                  </button>
+                )}
                 <button 
                     onClick={() => setIsMortgageModal(true)}
                     className="w-full bg-foreground/5 border border-foreground/10 text-foreground font-bold py-6 rounded-[2rem] hover:bg-foreground/10 transition-all uppercase tracking-widest text-xs"
@@ -353,6 +633,32 @@ export default function PropertyDetailPage() {
                         REQUEST CALLBACK
                     </button>
                 </div>
+             )}
+
+             {offers.length > 0 && (
+               <div className="glass p-8 mt-10 rounded-[2.5rem] border border-foreground/10">
+                 <h3 className="text-xl font-bold text-foreground mb-4">Current Offers</h3>
+                 {offersLoading ? (
+                   <p className="text-foreground/60">Loading offers...</p>
+                 ) : (
+                   <div className="space-y-4">
+                     {offers.map((offer: any) => (
+                       <div key={offer.id} className="rounded-3xl bg-background/80 p-4 border border-foreground/10">
+                         <div className="flex items-center justify-between gap-3">
+                           <div>
+                             <p className="text-sm uppercase tracking-[0.25em] text-foreground/40">{offer.property_details?.title}</p>
+                             <p className="text-lg font-semibold text-foreground">{offer.currency} {parseFloat(offer.amount).toLocaleString()}</p>
+                           </div>
+                           <span className={`px-3 py-1 rounded-full text-xs font-bold ${offer.status === 'PENDING' ? 'bg-amber-500/15 text-amber-500' : offer.status === 'ACCEPTED' ? 'bg-emerald-500/15 text-emerald-500' : 'bg-rose-500/15 text-rose-500'}`}>
+                             {offer.status}
+                           </span>
+                         </div>
+                         <p className="text-sm text-foreground/60 mt-3">{offer.message || 'No message provided.'}</p>
+                       </div>
+                     ))}
+                   </div>
+                 )}
+               </div>
              )}
           </motion.div>
         </div>
@@ -423,6 +729,38 @@ export default function PropertyDetailPage() {
                 ))}
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Offer Modal */}
+      <AnimatePresence>
+        {isOfferModal && (
+            <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 bg-black/60 backdrop-blur-md">
+                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-background w-full max-w-md rounded-[2.5rem] shadow-2xl p-10 border border-foreground/10">
+                    <div className="flex justify-between items-center mb-8">
+                        <h2 className="text-2xl font-serif font-bold text-foreground">Submit an Offer</h2>
+                        <button onClick={() => setIsOfferModal(false)} className="text-foreground/40"><FiX size={24}/></button>
+                    </div>
+                    <form onSubmit={handleSubmitOffer} className="space-y-6">
+                        <div>
+                            <label className="text-[10px] font-black uppercase tracking-[0.2em] text-foreground/40 mb-2 block">Offer Amount</label>
+                            <input required type="number" min="1" step="0.01" value={offerData.amount} onChange={e => setOfferData({ ...offerData, amount: e.target.value })} className="w-full bg-foreground/5 border border-foreground/10 p-4 rounded-xl outline-none focus:border-accent text-foreground" />
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-black uppercase tracking-[0.2em] text-foreground/40 mb-2 block">Message</label>
+                            <textarea value={offerData.message} onChange={e => setOfferData({ ...offerData, message: e.target.value })} className="w-full bg-foreground/5 border border-foreground/10 p-4 rounded-xl outline-none focus:border-accent text-foreground resize-none" rows={4}></textarea>
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-black uppercase tracking-[0.2em] text-foreground/40 mb-2 block">Expires On</label>
+                            <input type="date" value={offerData.expires_at} onChange={e => setOfferData({ ...offerData, expires_at: e.target.value })} className="w-full bg-foreground/5 border border-foreground/10 p-4 rounded-xl outline-none focus:border-accent text-foreground" />
+                        </div>
+                        {offerError && <p className="text-rose-500 text-sm">{offerError}</p>}
+                        <button type="submit" disabled={offerSubmitting} className="w-full bg-accent text-primary-dark font-black py-5 rounded-2xl shadow-xl shadow-accent/20 uppercase tracking-widest">
+                            {offerSubmitting ? 'Submitting Offer...' : 'SUBMIT OFFER'}
+                        </button>
+                    </form>
+                </motion.div>
+            </div>
         )}
       </AnimatePresence>
 
@@ -509,17 +847,83 @@ export default function PropertyDetailPage() {
       <AnimatePresence>
         {isChatModal && (
             <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 bg-black/60 backdrop-blur-md">
-                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-background w-full max-w-md rounded-[2.5rem] shadow-2xl p-10 border border-foreground/10 text-foreground">
-                    <div className="flex justify-between items-center mb-8">
-                        <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 bg-accent rounded-full flex items-center justify-center font-bold text-primary-dark">{property.owner.full_name[0]}</div>
-                            <h2 className="text-xl font-bold">Chat with {property.owner.full_name.split(' ')[0]}</h2>
+                <motion.div 
+                    initial={{ scale: 0.9, opacity: 0 }} 
+                    animate={{ scale: 1, opacity: 1 }} 
+                    className="bg-background w-full max-w-2xl rounded-[2.5rem] shadow-2xl p-6 border border-foreground/10 text-foreground flex flex-col max-h-[90vh]"
+                >
+                    <div className="flex flex-col gap-4 mb-6 flex-shrink-0">
+                        <div className="flex justify-between items-center">
+                            <div className="flex items-center gap-4">
+                                <div className="w-14 h-14 bg-accent rounded-full flex items-center justify-center font-bold text-primary-dark text-xl">{property.owner.full_name[0]}</div>
+                                <div>
+                                    <h2 className="text-2xl font-bold">Chat with {property.owner.full_name.split(' ')[0]}</h2>
+                                    <p className="text-sm text-foreground/50">{property.owner.full_name}</p>
+                                </div>
+                            </div>
+                            <button onClick={handleCloseChat} className="text-foreground/40 hover:text-red-500 transition"><FiX size={24}/></button>
                         </div>
-                        <button onClick={() => setIsChatModal(false)} className="text-foreground/40"><FiX size={24}/></button>
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-sm text-foreground/60">
+                            <div className="flex items-center gap-2">
+                                <span className={`h-3 w-3 rounded-full ${isOwnerOnline ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                                <span>{isOwnerOnline ? 'Online now' : `Last seen ${ownerLastSeen ? new Date(ownerLastSeen).toLocaleString() : 'recently'}`}</span>
+                            </div>
+                            <div className="text-xs uppercase tracking-[0.3em] font-semibold text-foreground/50">
+                                {socketConnected ? 'Connected' : isReconnecting ? 'Reconnecting...' : 'Offline'}
+                            </div>
+                        </div>
                     </div>
-                    <form onSubmit={handleSendMessage} className="space-y-4">
-                        <textarea required name="message" placeholder="Type your message..." className="w-full bg-foreground/5 border border-foreground/10 p-4 rounded-2xl outline-none focus:border-accent text-foreground resize-none" rows={4}></textarea>
-                        <button type="submit" className="w-full bg-accent text-primary-dark font-black py-5 rounded-2xl shadow-xl uppercase tracking-widest">SEND MESSAGE</button>
+
+                    <div className="flex-1 overflow-hidden rounded-[2rem] border border-foreground/10 bg-foreground/5 mb-4">
+                        <div className="h-full overflow-y-auto p-6 space-y-4" style={{ scrollbarGutter: 'stable' }}>
+                            {loadingChatHistory ? (
+                                <div className="flex items-center justify-center h-full text-foreground/40">Loading messages...</div>
+                            ) : chatMessages.length === 0 ? (
+                                <div className="text-center py-20 text-foreground/50">No conversation history yet. Start the chat below.</div>
+                            ) : (
+                                chatMessages.map((message) => {
+                                    const isMine = message.sender === user?.id;
+                                    const status = messageStatusMap[String(message.id)] || message.status;
+                                    return (
+                                        <div key={message.id} className={`max-w-[80%] ${isMine ? 'ml-auto bg-accent/10 text-foreground' : 'mr-auto bg-background/90 text-foreground'} rounded-3xl p-4 shadow-sm border border-foreground/5`}>
+                                            <div className="text-sm leading-6 whitespace-pre-wrap">{message.message || message.content}</div>
+                                            <div className="mt-2 flex items-center justify-between text-[11px] text-foreground/50">
+                                                <span>{new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                                {isMine && <span className="font-bold uppercase">{status}</span>}
+                                            </div>
+                                        </div>
+                                    );
+                                })
+                            )}
+                            <div ref={chatEndRef} />
+                        </div>
+                    </div>
+
+                    {typingIndicator && (
+                        <div className="mb-2 px-4 text-xs text-foreground/50 flex-shrink-0">{property.owner.full_name.split(' ')[0]} is typing...</div>
+                    )}
+
+                    <form onSubmit={handleSendMessage} className="relative flex-shrink-0">
+                        <textarea
+                            required
+                            value={chatDraft}
+                            onChange={(e) => handleChatInputChange(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault();
+                                    handleSendMessage(e as any);
+                                }
+                            }}
+                            placeholder="Write your message..."
+                            className="w-full min-h-[100px] max-h-[200px] resize-none rounded-[2rem] border border-foreground/10 bg-background/90 p-5 pr-16 text-foreground outline-none focus:border-accent shadow-inner transition-all"
+                        />
+                        <button 
+                            type="submit" 
+                            disabled={!chatDraft.trim()}
+                            className="absolute right-3 bottom-3 w-12 h-12 flex items-center justify-center rounded-full bg-accent text-primary-dark shadow-xl transition-all hover:scale-110 active:scale-95 disabled:opacity-50 disabled:hover:scale-100"
+                        >
+                            <FiSend size={20} />
+                        </button>
                     </form>
                 </motion.div>
             </div>

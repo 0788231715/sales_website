@@ -5,9 +5,7 @@ import {
   ShieldCheck, Upload, AlertCircle, CheckCircle, 
   UserCheck, FileText, Lock, ArrowRight 
 } from "lucide-react";
-import axios from "axios";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+import api from "@/utils/api";
 
 export default function KYCPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -31,12 +29,8 @@ export default function KYCPage() {
     formData.append('id_document', file);
 
     try {
-      const token = localStorage.getItem("accessToken");
-      await axios.post(`${API_URL}/verification/`, formData, {
-        headers: { 
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data'
-        }
+      await api.post("/verification/", formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
       });
       setStatus('success');
     } catch (err: any) {
